@@ -3,7 +3,7 @@ import numpy as np
 from skimage.morphology import skeletonize
 
 # Load the video
-video_path = '/home/yanghehao/Downloads/Tom.mp4'
+video_path = 'Tom.mp4'
 cap = cv2.VideoCapture(video_path)
 
 # Initialize a background subtractor with KNN, adjusted parameters
