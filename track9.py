@@ -32,6 +32,8 @@ def get_trackbar_settings(window_name):
         "Morph Kernel Size": cv2.getTrackbarPos("Morph Kernel Size", window_name),
         "CLAHE Clip Limit": cv2.getTrackbarPos("CLAHE Clip Limit", window_name) / 10.0,
         "CLAHE Grid Size": cv2.getTrackbarPos("CLAHE Grid Size", window_name),
+        "Gaussian Blur Kernel Size": cv2.getTrackbarPos("Gaussian Blur Kernel Size", window_name) * 2 + 1,
+        "Morph Gradient Kernel Size": cv2.getTrackbarPos("Morph Gradient Kernel Size", window_name),
     }
     return settings
 
@@ -56,6 +58,8 @@ cv2.createTrackbar("Min Distance", trackbar_window, 10, 50, lambda x: None)
 cv2.createTrackbar("Morph Kernel Size", trackbar_window, 3, 10, lambda x: None)
 cv2.createTrackbar("CLAHE Clip Limit", trackbar_window, 20, 100, lambda x: None)
 cv2.createTrackbar("CLAHE Grid Size", trackbar_window, 8, 50, lambda x: None)
+cv2.createTrackbar("Gaussian Blur Kernel Size", trackbar_window, 2, 10, lambda x: None)
+cv2.createTrackbar("Morph Gradient Kernel Size", trackbar_window, 3, 10, lambda x: None)
 
 # Video capture
 video_path = 'Tom.mp4'
@@ -101,7 +105,7 @@ while True:
     enhanced_gray = clahe.apply(gray)
     cv2.imshow("CLAHE Enhanced", enhanced_gray)  # Visualization 2: CLAHE enhanced image
 
-    blurred = cv2.GaussianBlur(enhanced_gray, (5, 5), 0)
+    blurred = cv2.GaussianBlur(enhanced_gray, (settings["Gaussian Blur Kernel Size"], settings["Gaussian Blur Kernel Size"]), 0)
     adaptive_thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                             cv2.THRESH_BINARY_INV, settings["Threshold Block Size"], settings["Threshold C"])
     cv2.imshow("Adaptive Threshold", adaptive_thresh)  # Visualization 3: Adaptive thresholded image
