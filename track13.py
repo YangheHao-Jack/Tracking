@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from skimage.morphology import skeletonize
 from skimage.measure import label, regionprops
+from sklearn.neighbors import LocalOutlierFactor
 
 # Function to find the largest connected component
 def get_longest_component(binary_image):
@@ -35,6 +36,8 @@ def get_trackbar_settings(window_name):
         "Gaussian Blur Kernel Size": cv2.getTrackbarPos("Gaussian Blur Kernel Size", window_name) * 2 + 1,
         "Morph Gradient Kernel Size": cv2.getTrackbarPos("Morph Gradient Kernel Size", window_name),
         "Intensity Threshold": cv2.getTrackbarPos("Intensity Threshold", window_name),
+        "LOF Neighbors": cv2.getTrackbarPos("LOF Neighbors", window_name),
+        "LOF Contamination": cv2.getTrackbarPos("LOF Contamination", window_name) / 100.0,
     }
     return settings
 
@@ -52,17 +55,18 @@ cv2.createTrackbar("Measurement Noise", trackbar_window, 10, 100, lambda x: None
 cv2.createTrackbar("Canny Low", trackbar_window, 50, 255, lambda x: None)
 cv2.createTrackbar("Canny High", trackbar_window, 150, 255, lambda x: None)
 cv2.createTrackbar("Threshold Block Size", trackbar_window, 15, 50, lambda x: None)
-cv2.createTrackbar("Threshold C", trackbar_window, 3, 10, lambda x: None)
+cv2.createTrackbar("Threshold C", trackbar_window, 2, 10, lambda x: None)
 cv2.createTrackbar("Max Corners", trackbar_window, 50, 500, lambda x: None)
-cv2.createTrackbar("Quality Level", trackbar_window, 1, 100, lambda x: None)
+cv2.createTrackbar("Quality Level", trackbar_window, 10, 100, lambda x: None)
 cv2.createTrackbar("Min Distance", trackbar_window, 10, 50, lambda x: None)
-cv2.createTrackbar("Morph Kernel Size", trackbar_window, 1, 10, lambda x: None)
-cv2.createTrackbar("CLAHE Clip Limit", trackbar_window, 8, 100, lambda x: None)
-cv2.createTrackbar("CLAHE Grid Size", trackbar_window, 1, 50, lambda x: None)
-cv2.createTrackbar("Gaussian Blur Kernel Size", trackbar_window, 10, 10, lambda x: None)
+cv2.createTrackbar("Morph Kernel Size", trackbar_window, 3, 10, lambda x: None)
+cv2.createTrackbar("CLAHE Clip Limit", trackbar_window, 20, 100, lambda x: None)
+cv2.createTrackbar("CLAHE Grid Size", trackbar_window, 8, 50, lambda x: None)
+cv2.createTrackbar("Gaussian Blur Kernel Size", trackbar_window, 2, 10, lambda x: None)
 cv2.createTrackbar("Morph Gradient Kernel Size", trackbar_window, 3, 10, lambda x: None)
-cv2.createTrackbar("Intensity Threshold", trackbar_window, 10, 255, lambda x: None)
-
+cv2.createTrackbar("Intensity Threshold", trackbar_window, 0, 255, lambda x: None)
+cv2.createTrackbar("LOF Neighbors", trackbar_window, 5, 20, lambda x: None)
+cv2.createTrackbar("LOF Contamination", trackbar_window, 5, 50, lambda x: None)
 # Video capture
 video_path = 'Tom.mp4'
 cap = cv2.VideoCapture(video_path)
@@ -107,30 +111,23 @@ while True:
     enhanced_gray = clahe.apply(gray)
     cv2.imshow("CLAHE Enhanced", enhanced_gray)  # Visualization 2: CLAHE enhanced image
 
-    blurred = cv2.GaussianBlur(enhanced_gray, (settings["Gaussian Blur Kernel Size"], settings["Gaussian Blur Kernel Size"]), 0)
+    # Further enhance contrast using histogram equalization
+    equalized_gray = cv2.equalizeHist(enhanced_gray)
+    cv2.imshow("Histogram Equalized", equalized_gray)  # Visualization 3: Histogram equalized image
+
+    blurred = cv2.GaussianBlur(equalized_gray, (settings["Gaussian Blur Kernel Size"], settings["Gaussian Blur Kernel Size"]), 0)
     adaptive_thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                             cv2.THRESH_BINARY_INV, settings["Threshold Block Size"], settings["Threshold C"])
-    cv2.imshow("Adaptive Threshold", adaptive_thresh)  # Visualization 3: Adaptive thresholded image
+    cv2.imshow("Adaptive Threshold", adaptive_thresh)  # Visualization 4: Adaptive thresholded image
 
     # Thresholding based on intensity in grayscale
     _, intensity_thresh = cv2.threshold(gray, settings["Intensity Threshold"], 255, cv2.THRESH_BINARY)
-    cv2.imshow("Intensity Threshold", intensity_thresh)  # Visualization 4: Intensity thresholded image
+    cv2.imshow("Intensity Threshold", intensity_thresh)  # Visualization 5: Intensity thresholded image
 
-    # Combine the adaptive threshold and intensity-based threshold
-    combined_thresh = cv2.bitwise_and(adaptive_thresh, intensity_thresh)
-    cv2.imshow("Combined Threshold", combined_thresh)  # Visualization 5: Combined thresholded image
-
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (settings["Morph Kernel Size"], settings["Morph Kernel Size"]))
-    refined_mask = cv2.morphologyEx(combined_thresh, cv2.MORPH_CLOSE, kernel)
-    refined_mask = cv2.morphologyEx(refined_mask, cv2.MORPH_OPEN, kernel)
-    cv2.imshow("Refined Mask", refined_mask)  # Visualization 6: Refined mask
-
-    skeleton = skeletonize(refined_mask // 255).astype(np.uint8) * 255
-    cv2.imshow("Skeleton", skeleton)  # Visualization 7: Skeletonized image
-
-    catheter_mask = get_longest_component(skeleton)
+    # Use intensity threshold as mask for tracking
+    catheter_mask = get_longest_component(intensity_thresh)
     edges = cv2.Canny(catheter_mask, settings["Canny Low"], settings["Canny High"])
-    cv2.imshow("Edges", edges)  # Visualization 8: Canny edges
+    cv2.imshow("Edges", edges)  # Visualization 6: Canny edges
 
     feature_points = cv2.goodFeaturesToTrack(edges, maxCorners=settings["Max Corners"],
                                              qualityLevel=settings["Quality Level"], minDistance=settings["Min Distance"])
@@ -138,13 +135,24 @@ while True:
     extra_tracker = None
 
     if feature_points is not None:
-        points = sorted([tuple(point.ravel()) for point in feature_points], key=lambda p: p[0])
-        detected_tip = points[0]
-        extra_tracker = points[5] if len(points) > 5 else detected_tip
+        points = [tuple(point.ravel()) for point in feature_points]
 
-        for point in points:
-            x, y = map(int, point)
-            cv2.circle(frame, (x, y), 3, (0, 255, 255), -1)
+        # Remove outliers using Local Outlier Factor (LOF)
+        if len(points) > 2:
+            lof = LocalOutlierFactor(n_neighbors=5)
+            points_array = np.array(points)
+            is_inlier = lof.fit_predict(points_array)
+            points = [point for point, inlier in zip(points, is_inlier) if inlier == 1]
+
+        # Sort and select the leftmost point as detected tip
+        if points:
+            points = sorted(points, key=lambda p: p[0])
+            detected_tip = points[0]
+            extra_tracker = points[5] if len(points) > 5 else detected_tip
+
+            for point in points:
+                x, y = map(int, point)
+                cv2.circle(frame, (x, y), 3, (0, 255, 255), -1)
 
     if detected_tip is not None:
         kalman.correct(np.array([[np.float32(detected_tip[0])], [np.float32(detected_tip[1])]]))
